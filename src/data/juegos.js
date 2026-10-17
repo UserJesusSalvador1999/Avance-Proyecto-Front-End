@@ -1,26 +1,5 @@
 export const listaJuegos = [
-  {
-    id: 1,
-    titulo: "Black Myth: Wukong",
-    genero: "Acción / RPG",
-    rating: 9.6,
-    lanzamiento: 2024,
-    desarrollador: "Game Science",
-    imagen: "img/Black Myth Wukong.jpg",
-    resumenCorto: "Un RPG de acción enraizado en la mitología china donde encarnas al Predestinado.",
-    biografia: "Black Myth: Wukong es un RPG de acción basado en la clásica novela china del siglo XVI 'Viaje al Oeste'. Como el Predestinado, te aventurarás a través de impresionantes paisajes orientales, enfrentando a colosales criaturas mitológicas mediante un sistema de combate ágil con bastón mágico, transformaciones espirituales y hechizos estratégicos. Destaca por su apartado técnico con Unreal Engine 5 y su exigente diseño de jefes.",
-    requisitosPC: {
-      cpu: "Intel Core i5-8400 / AMD Ryzen 5 1600",
-      gpu: "NVIDIA GeForce RTX 2060 / RTX 4050 (Recomendado DLSS)",
-      ram: "16 GB RAM",
-      almacenamiento: "130 GB SSD"
-    },
-    fpsBase: 85,
-    tiendas: [
-      { nombre: "Steam", url: "https://store.steampowered.com/app/2358720/Black_Myth_Wukong/", precio: "$1,299 MXN" },
-      { nombre: "Epic Games Store", url: "https://store.epicgames.com/es-ES/p/black-myth-wukong-87a72b", precio: "$1,299 MXN" }
-    ]
-  },
+
   {
     id: 2,
     titulo: "Hollow Knight: Silksong",
