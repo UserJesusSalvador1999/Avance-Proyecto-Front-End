@@ -1,3 +1,4 @@
+const base = import.meta.env.BASE_URL
 export const listaJuegos = [
   {
     id: 1,
