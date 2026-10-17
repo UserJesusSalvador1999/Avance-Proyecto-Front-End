@@ -6,7 +6,7 @@ export const listaJuegos = [
     rating: 9.6,
     lanzamiento: 2024,
     desarrollador: "Game Science",
-    imagen: "img/Black Myth Wukong.jpg",
+    imagen: "dist/img/Black Myth Wukong.jpg",
     resumenCorto: "Un RPG de acción enraizado en la mitología china donde encarnas al Predestinado.",
     biografia: "Black Myth: Wukong es un RPG de acción basado en la clásica novela china del siglo XVI 'Viaje al Oeste'. Como el Predestinado, te aventurarás a través de impresionantes paisajes orientales, enfrentando a colosales criaturas mitológicas mediante un sistema de combate ágil con bastón mágico, transformaciones espirituales y hechizos estratégicos. Destaca por su apartado técnico con Unreal Engine 5 y su exigente diseño de jefes.",
     requisitosPC: {
