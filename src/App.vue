@@ -1,6 +1,19 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { listaJuegos } from './data/juegos.js'
+import { db } from './firebase.js'
+import {
+  collection,
+  addDoc,
+  updateDoc,
+  deleteDoc,
+  doc,
+  onSnapshot,
+  query,
+  orderBy,
+  serverTimestamp,
+  increment
+} from 'firebase/firestore'
 
 // --- ESTADO DE NAVEGACIÓN ---
 const moduloActivo = ref('inicio') // 'inicio', 'top', 'biografia', 'simulador', 'favoritos', 'comunidad'
@@ -118,7 +131,12 @@ const calcularFPS = (fpsBase) => {
   return Math.min(144, Math.round(fpsBase * multiplicadorHardware.value))
 }
 
-// --- MÓDULO DE COMUNIDAD Y RESEÑAS ---
+// --- PERSISTENCIA LOCAL PARA LABORATORIO PC ---
+watch([gpuSeleccionada, ramSeleccionada, calidadGrafica], ([gpu, ram, calidad]) => {
+  localStorage.setItem('config_pc_gamer', JSON.stringify({ gpu, ram, calidad }))
+})
+
+// --- MÓDULO DE COMUNIDAD Y RESEÑAS (FIREBASE FIRESTORE) ---
 const nuevaResena = ref({
   autor: '',
   juegoTitulo: listaJuegos[1].titulo,
@@ -126,38 +144,131 @@ const nuevaResena = ref({
   comentario: ''
 })
 
-const resenasComunidad = ref([
-  {
-    id: 101,
-    autor: 'MapacheGamer_99',
-    juegoTitulo: 'Hollow Knight: Silksong',
-    puntuacion: 10,
-    comentario: 'El diseño de niveles en Pharloom y la agilidad de Hornet superaron todas mis expectativas.',
-    fecha: 'Hace 2 horas'
-  },
-  {
-    id: 102,
-    autor: 'Luis_69',
-    juegoTitulo: 'Age of Mythology: Retold',
-    puntuacion: 9.5,
-    comentario: 'Correrlo a 120 FPS estables con los poderes divinos recargables le da una vida nueva al clásico.',
-    fecha: 'Ayer'
-  }
-])
+const resenasComunidad = ref([])
+const cargandoResenas = ref(true)
+const enviandoResena = ref(false)
+const errorBD = ref('')
+const editandoId = ref(null)
+const filtroJuegoComunidad = ref('Todos')
+let desuscribirResenas = null
 
-const publicarResena = () => {
+const resenasFiltradas = computed(() => {
+  if (filtroJuegoComunidad.value === 'Todos') return resenasComunidad.value
+  return resenasComunidad.value.filter(r => r.juegoTitulo === filtroJuegoComunidad.value)
+})
+
+const publicarResena = async () => {
   if (!nuevaResena.value.autor.trim() || !nuevaResena.value.comentario.trim()) return
-  resenasComunidad.value.unshift({
-    id: Date.now(),
-    autor: nuevaResena.value.autor,
-    juegoTitulo: nuevaResena.value.juegoTitulo,
-    puntuacion: nuevaResena.value.puntuacion,
-    comentario: nuevaResena.value.comentario,
-    fecha: 'Justo ahora'
-  })
+
+  enviandoResena.value = true
+  errorBD.value = ''
+
+  try {
+    if (editandoId.value) {
+      await updateDoc(doc(db, 'resenas', editandoId.value), {
+        autor: nuevaResena.value.autor.trim(),
+        juegoTitulo: nuevaResena.value.juegoTitulo,
+        puntuacion: Number(nuevaResena.value.puntuacion),
+        comentario: nuevaResena.value.comentario.trim(),
+        editado: true
+      })
+      editandoId.value = null
+    } else {
+      await addDoc(collection(db, 'resenas'), {
+        autor: nuevaResena.value.autor.trim(),
+        juegoTitulo: nuevaResena.value.juegoTitulo,
+        puntuacion: Number(nuevaResena.value.puntuacion),
+        comentario: nuevaResena.value.comentario.trim(),
+        fecha: new Date().toLocaleDateString('es-MX', {
+          day: '2-digit',
+          month: 'short',
+          year: 'numeric'
+        }),
+        likes: 0,
+        editado: false,
+        creadoEn: serverTimestamp()
+      })
+    }
+
+    nuevaResena.value.autor = ''
+    nuevaResena.value.comentario = ''
+    nuevaResena.value.puntuacion = 10
+  } catch (error) {
+    console.error('Error en Firestore:', error)
+    errorBD.value = 'No se pudo conectar con la base de datos. Revisa las reglas de Firestore.'
+  } finally {
+    enviandoResena.value = false
+  }
+}
+
+const iniciarEdicion = (res) => {
+  editandoId.value = res.id
+  nuevaResena.value = {
+    autor: res.autor,
+    juegoTitulo: res.juegoTitulo,
+    puntuacion: res.puntuacion,
+    comentario: res.comentario
+  }
+  window.scrollTo({ top: 0, behavior: 'smooth' })
+}
+
+const cancelarEdicion = () => {
+  editandoId.value = null
   nuevaResena.value.autor = ''
   nuevaResena.value.comentario = ''
+  nuevaResena.value.puntuacion = 10
 }
+
+const eliminarResena = async (id) => {
+  if (!confirm('¿Seguro que deseas eliminar esta reseña?')) return
+  try {
+    await deleteDoc(doc(db, 'resenas', id))
+  } catch (error) {
+    console.error('Error al eliminar:', error)
+    errorBD.value = 'Error al eliminar la reseña.'
+  }
+}
+
+const darLike = async (id) => {
+  try {
+    await updateDoc(doc(db, 'resenas', id), {
+      likes: increment(1)
+    })
+  } catch (error) {
+    console.error('Error al dar like:', error)
+  }
+}
+
+onMounted(() => {
+  const configPCGuardada = localStorage.getItem('config_pc_gamer')
+  if (configPCGuardada) {
+    const parsed = JSON.parse(configPCGuardada)
+    gpuSeleccionada.value = parsed.gpu || 'rtx4050'
+    ramSeleccionada.value = parsed.ram || '16'
+    calidadGrafica.value = parsed.calidad || 'alta'
+  }
+
+  const q = query(collection(db, 'resenas'), orderBy('creadoEn', 'desc'))
+  desuscribirResenas = onSnapshot(
+    q,
+    (snapshot) => {
+      resenasComunidad.value = snapshot.docs.map(d => ({
+        id: d.id,
+        ...d.data()
+      }))
+      cargandoResenas.value = false
+    },
+    (error) => {
+      console.error('Error leyendo Firestore:', error)
+      errorBD.value = 'Error al cargar reseñas desde la nube.'
+      cargandoResenas.value = false
+    }
+  )
+})
+
+onUnmounted(() => {
+  if (desuscribirResenas) desuscribirResenas()
+})
 </script>
 
 <template>
@@ -509,12 +620,18 @@ const publicarResena = () => {
       <section v-if="moduloActivo === 'comunidad'" class="fade-in">
         <div class="section-header">
           <h1>💬 Comunidad y Reseñas</h1>
-          <p>Publica tu reseña sobre cualquiera de los títulos del catálogo.</p>
+          <p>
+            Publica, edita o elimina reseñas guardadas en tiempo real en la nube
+            <span class="cloud-badge">☁️ Firebase Firestore Activo</span>
+          </p>
         </div>
+
+        <div v-if="errorBD" class="error-banner">{{ errorBD }}</div>
 
         <div class="community-layout">
           <form class="review-form" @submit.prevent="publicarResena">
-            <h3>Escribir una Reseña</h3>
+            <h3>{{ editandoId ? '✏️ Editando Reseña' : 'Escribir una Reseña' }}</h3>
+
             <label>Tu Nickname / Nombre:</label>
             <input v-model="nuevaResena.autor" type="text" placeholder="Ej. Salvador_Gamer" required class="search-input" />
 
@@ -524,22 +641,59 @@ const publicarResena = () => {
             </select>
 
             <label>Calificación ({{ nuevaResena.puntuacion }} / 10):</label>
-            <input v-model="nuevaResena.puntuacion" type="range" min="1" max="10" step="0.5" />
+            <input v-model.number="nuevaResena.puntuacion" type="range" min="1" max="10" step="0.5" />
 
             <label>Tu Opinión:</label>
             <textarea v-model="nuevaResena.comentario" rows="4" placeholder="¿Qué te pareció el rendimiento y la historia?" required class="search-input"></textarea>
 
-            <button type="submit" class="btn-primary">Publicar Reseña</button>
+            <button type="submit" class="btn-primary" :disabled="enviandoResena">
+              {{ enviandoResena ? 'Guardando en la nube...' : (editandoId ? 'Guardar Cambios' : 'Publicar Reseña') }}
+            </button>
+
+            <button v-if="editandoId" type="button" class="btn-secondary" @click="cancelarEdicion">
+              Cancelar Edición
+            </button>
           </form>
 
           <div class="reviews-feed">
-            <div v-for="res in resenasComunidad" :key="res.id" class="review-card">
+            <div class="feed-toolbar">
+              <span><strong>{{ resenasFiltradas.length }}</strong> reseña(s) en la nube</span>
+              <select v-model="filtroJuegoComunidad" class="select-input feed-select">
+                <option value="Todos">Filtrar: Todos los juegos</option>
+                <option v-for="j in listaJuegos" :key="j.id" :value="j.titulo">{{ j.titulo }}</option>
+              </select>
+            </div>
+
+            <div v-if="cargandoResenas" class="review-card">
+              <p>Cargando reseñas desde Firebase...</p>
+            </div>
+
+            <div v-else-if="resenasFiltradas.length === 0" class="review-card">
+              <p>Aún no hay reseñas registradas para esta selección. ¡Sé el primero en publicar una!</p>
+            </div>
+
+            <div v-for="res in resenasFiltradas" :key="res.id" class="review-card">
               <div class="review-top">
                 <strong>👤 {{ res.autor }}</strong>
                 <span class="tag-rating">⭐ {{ res.puntuacion }} / 10</span>
               </div>
-              <div class="review-game">Juego: <strong>{{ res.juegoTitulo }}</strong> • <small>{{ res.fecha }}</small></div>
+              <div class="review-game">
+                Juego: <strong>{{ res.juegoTitulo }}</strong> • <small>{{ res.fecha }}</small>
+                <small v-if="res.editado"> (editado)</small>
+              </div>
               <p>{{ res.comentario }}</p>
+
+              <div class="review-actions">
+                <button class="btn-mini btn-like" @click="darLike(res.id)">
+                  👍 Útil ({{ res.likes || 0 }})
+                </button>
+                <button class="btn-mini btn-edit" @click="iniciarEdicion(res)">
+                  ✏️ Editar
+                </button>
+                <button class="btn-mini btn-delete" @click="eliminarResena(res.id)">
+                  🗑️ Eliminar
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -1254,5 +1408,77 @@ body {
   .rank-actions {
     align-items: center;
   }
+}
+.btn-primary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.cloud-badge {
+  display: inline-block;
+  margin-left: 0.5rem;
+  background: rgba(34, 197, 94, 0.15);
+  color: #4ade80;
+  border: 1px solid #22c55e;
+  padding: 0.15rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.error-banner {
+  background: rgba(239, 68, 68, 0.18);
+  border: 1px solid #ef4444;
+  color: #fca5a5;
+  padding: 0.85rem 1rem;
+  border-radius: 10px;
+  margin-bottom: 1.2rem;
+}
+
+.feed-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.feed-select {
+  max-width: 280px;
+}
+
+.review-actions {
+  display: flex;
+  gap: 0.6rem;
+  margin-top: 0.9rem;
+  padding-top: 0.7rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  flex-wrap: wrap;
+}
+
+.btn-mini {
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--text-main);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  padding: 0.35rem 0.75rem;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.8rem;
+  transition: all 0.2s;
+}
+
+.btn-like:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.btn-edit:hover {
+  border-color: #facc15;
+  color: #facc15;
+}
+
+.btn-delete:hover {
+  border-color: #ef4444;
+  color: #f87171;
 }
 </style>
